@@ -1,5 +1,5 @@
 // ./src/components/Component1.jsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 
 const Component1 = () => {
     const data = {
@@ -76,22 +76,35 @@ const Component1 = () => {
     };
 
     const [comments, setComments] = useState(data.comments);
-    const [newComment, setNewComment] = useState(''); // 新的评论内容
-    const [newReply, setNewReply] = useState(''); // 新的回复内容
-    const [replyingTo, setReplyingTo] = useState([]); // 记录当前回复的评论
-    const [newReplyReply, setNewReplyReply] = useState(''); // 新的回复的回复内容
-    const [replyingToReply, setReplyingToReply] = useState(null);
-    const [activeCommentId, setActiveCommentId] = useState(null);
-    const currentUser = data.currentUser;
-    const [editingId, setEditingId] = useState(null); // 记录正在编辑的评论/回复ID
-    const [editContent, setEditContent] = useState(''); // 存储编辑的内容
-    const [userVotes, setUserVotes] = useState({}); // 格式: { commentId: 'up'/'down' }
+    const [newComment, setNewComment] = useState('');
+    const [replyingTo, setReplyingTo] = useState({});
+    const [replyingToReply, setReplyingToReply] = useState({});
+    const [newReplies, setNewReplies] = useState({});
+    const [currentUser, setCurrentUser] = useState(data.currentUser);
+    const [editingId, setEditingId] = useState(null);
+    const [editContent, setEditContent] = useState('');
 
-    // 处理新评论
+    const allUsers = useMemo(() => {
+        const users = new Set();
+        users.add(JSON.stringify(data.currentUser));
+
+        data.comments.forEach((comment) => {
+            users.add(JSON.stringify(comment.user));
+            comment.replies.forEach((reply) => {
+                users.add(JSON.stringify(reply.user));
+            });
+        });
+
+        return Array.from(users).map((user) => JSON.parse(user));
+    }, []);
+
+    const handleUserChange = (selectedUser) => {
+        setCurrentUser(selectedUser);
+    };
+
     const handleNewComment = () => {
-        if (!newComment.trim()) return; // 防止提交空评论
+        if (!newComment.trim()) return;
 
-        // 创建新的评论对象
         const newCommentObject = {
             id: comments.length + 1,
             content: newComment,
@@ -101,19 +114,31 @@ const Component1 = () => {
             replies: [],
         };
 
-        setComments([...comments, newCommentObject]); // 更新评论列表
+        setComments([...comments, newCommentObject]);
 
-        setNewComment(''); // 清空输入框
+        setNewComment('');
     };
 
-    // 通用的处理回复函数
-    const handleReply = (parentId, content, level) => {
-        if (!content.trim()) return;
+    const handleReplyClick = (commentId, replyId = null) => {
+        if (replyId) {
+            setReplyingToReply((prev) => ({
+                ...prev,
+                [replyId]: !prev[replyId],
+            }));
+        } else {
+            setReplyingTo((prev) => ({
+                ...prev,
+                [commentId]: !prev[commentId],
+            }));
+        }
+    };
+
+    const handleReply = (commentId, content, level, replyId = null) => {
+        if (!content?.trim()) return;
 
         setComments(
             comments.map((comment) => {
-                // 如果是直接回复评论
-                if (level === 'comment' && comment.id === parentId) {
+                if (comment.id === commentId) {
                     return {
                         ...comment,
                         replies: [
@@ -124,64 +149,44 @@ const Component1 = () => {
                                 createdAt: 'Just now',
                                 score: 0,
                                 user: currentUser,
-                                replyingTo: comment.user.username,
+                                replyingTo:
+                                    level === 'comment'
+                                        ? comment.user.username
+                                        : comment.replies.find((r) => r.id === replyId).user.username,
                             },
                         ],
                     };
                 }
-
-                // 如果是回复某条回复，需要先找到包含该回复的评论
-                if (level === 'reply') {
-                    // 检查这个评论的replies中是否包含我们要回复的那条回复
-                    const replyExists = comment.replies.some((reply) => reply.id === parentId);
-
-                    if (replyExists) {
-                        return {
-                            ...comment,
-                            replies: [
-                                ...comment.replies,
-                                {
-                                    id: Date.now(),
-                                    content,
-                                    createdAt: 'Just now',
-                                    score: 0,
-                                    user: currentUser,
-                                    replyingTo: comment.replies.find((reply) => reply.id === parentId).user.username,
-                                },
-                            ],
-                        };
-                    }
-                }
-
                 return comment;
             })
         );
 
-        // 清理状态
-        setNewReply('');
-        setNewReplyReply('');
-        setReplyingTo([]);
-        setReplyingToReply(null);
-        setActiveCommentId(null);
+        if (level === 'comment') {
+            setReplyingTo((prev) => ({
+                ...prev,
+                [commentId]: false,
+            }));
+        } else {
+            setReplyingToReply((prev) => ({
+                ...prev,
+                [replyId]: false,
+            }));
+        }
+
+        setNewReplies((prev) => ({
+            ...prev,
+            [level === 'comment' ? commentId : replyId]: '',
+        }));
     };
 
-    const handleReplyClick = (commentId, replyId) => {
-        console.log('Clicked reply for comment:', commentId, 'reply:', replyId);
-        setActiveCommentId(commentId);
-        setReplyingToReply(replyId);
-    };
-
-    // 添加删除处理函数
     const handleDelete = (commentId, replyId = null) => {
         if (window.confirm('Are you sure you want to delete this comment?')) {
             setComments(
                 comments
                     .map((comment) => {
                         if (replyId === null) {
-                            // 删除主评论
                             return comment.id === commentId ? null : comment;
                         } else {
-                            // 删除回复
                             if (comment.id === commentId) {
                                 return {
                                     ...comment,
@@ -192,24 +197,21 @@ const Component1 = () => {
                         }
                     })
                     .filter(Boolean)
-            ); // 过滤掉 null 值
+            );
         }
     };
 
-    // 添加编辑处理函数
     const handleEdit = (commentId, replyId = null, content) => {
         setEditingId(replyId || commentId);
         setEditContent(content);
     };
 
-    // 添加保存编辑的函数
     const handleSaveEdit = (commentId, replyId = null) => {
         if (!editContent.trim()) return;
 
         setComments(
             comments.map((comment) => {
                 if (replyId === null) {
-                    // 编辑主评论
                     if (comment.id === commentId) {
                         return {
                             ...comment,
@@ -217,7 +219,6 @@ const Component1 = () => {
                         };
                     }
                 } else {
-                    // 编辑回复
                     if (comment.id === commentId) {
                         return {
                             ...comment,
@@ -231,39 +232,31 @@ const Component1 = () => {
             })
         );
 
-        // 清理编辑状态
         setEditingId(null);
         setEditContent('');
     };
 
-    // 处理投票的函数
     const handleVote = (commentId, replyId = null, isUpvote) => {
         setComments(
             comments.map((comment) => {
                 if (replyId === null) {
-                    // 处理评论的投票
                     if (comment.id === commentId) {
-                        // 如果已经投过相同的票，取消投票
                         if ((isUpvote && comment.vote === 1) || (!isUpvote && comment.vote === -1)) {
-                            const { vote, ...rest } = comment; // 删除 vote 属性
+                            const { vote, ...rest } = comment;
                             return rest;
                         }
-                        // 设置新的投票
                         return { ...comment, vote: isUpvote ? 1 : -1 };
                     }
                 } else {
-                    // 处理回复的投票
                     if (comment.id === commentId) {
                         return {
                             ...comment,
                             replies: comment.replies.map((reply) => {
                                 if (reply.id === replyId) {
-                                    // 如果已经投过相同的票，取消投票
                                     if ((isUpvote && reply.vote === 1) || (!isUpvote && reply.vote === -1)) {
-                                        const { vote, ...rest } = reply; // 删除 vote 属性
+                                        const { vote, ...rest } = reply;
                                         return rest;
                                     }
-                                    // 设置新的投票
                                     return { ...reply, vote: isUpvote ? 1 : -1 };
                                 }
                                 return reply;
@@ -278,9 +271,36 @@ const Component1 = () => {
 
     return (
         <div className='wholepage min-h-screen bg-[#eae7fa] p-[1rem] flex flex-col gap-[1.5rem] justify-center items-center'>
-            {comments.map((comment, index) => (
+            <div className='w-[80%] bg-[#fff] p-[1rem] rounded-md'>
+                <div className='flex items-center gap-[1rem] mb-[1rem]'>
+                    <span className='font-bold'>Current User:</span>
+                    <div className='flex gap-[1rem]'>
+                        {allUsers.map((user) => (
+                            <div
+                                key={user.username}
+                                className={`flex items-center gap-[0.5rem] cursor-pointer p-[0.5rem] rounded-md
+                                    ${
+                                        currentUser.username === user.username
+                                            ? 'bg-[#5358b6] text-white'
+                                            : 'hover:bg-[#eae7fa]'
+                                    }`}
+                                onClick={() => handleUserChange(user)}
+                            >
+                                <img
+                                    src={user.image.png}
+                                    alt={user.username}
+                                    className='w-[2rem] h-[2rem] rounded-full'
+                                />
+                                <span>{user.username}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {comments.map((comment) => (
                 <div
-                    key={index}
+                    key={comment.id}
                     className='discussBoxWrapper bg-[#eae7fa] w-[80%] flex flex-col gap-[1.5rem] items-center rounded-md'
                 >
                     <div className='commentBoxWrapper w-full bg-[#fff] flex p-[1.5rem] gap-[1.5rem] items-center rounded-md'>
@@ -353,7 +373,7 @@ const Component1 = () => {
                                         <div
                                             className='replyBtn flex items-center'
                                             role='button'
-                                            onClick={() => setReplyingTo(comment.id)}
+                                            onClick={() => handleReplyClick(comment.id)}
                                         >
                                             <i className='fa fa-reply mr-[0.5rem]'></i>
                                             <p>Reply</p>
@@ -382,153 +402,173 @@ const Component1 = () => {
                             </div>
                         </div>
                     </div>
-                    {/* 仅当点击"Reply"后，显示回复框 */}
-                    {replyingTo === comment.id && (
+
+                    {replyingTo[comment.id] && (
                         <div className='replyInputBox w-full bg-[#fff] p-[1rem] flex gap-[1rem]'>
                             <div className='currentUserAvatar'>
-                                <img src={currentUser.image.png} className='w-[2rem] h-[2rem]' />
+                                <img src={currentUser.image.png} className='w-[2rem] h-[2rem]' alt='user avatar' />
                             </div>
                             <div className='flex-grow border border-gray rounded'>
                                 <textarea
                                     className='w-full p-[0.5rem]'
                                     placeholder='Add a reply...'
-                                    value={newReply}
-                                    onChange={(e) => setNewReply(e.target.value)}
+                                    value={newReplies[comment.id] || ''}
+                                    onChange={(e) =>
+                                        setNewReplies((prev) => ({
+                                            ...prev,
+                                            [comment.id]: e.target.value,
+                                        }))
+                                    }
                                 />
                             </div>
-
                             <button
-                                className='self-start mt-[0.5rem] bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
-                                onClick={() => handleReply(comment.id, newReply, 'comment')}
+                                className='self-start bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
+                                onClick={() => handleReply(comment.id, newReplies[comment.id], 'comment')}
                             >
-                                Reply
+                                REPLY
                             </button>
                         </div>
                     )}
-                    {/* ✅ 条件渲染：仅当存在 replies 时渲染回复列表 */}
+
                     {comment.replies.length > 0 && (
                         <div className='replyBox w-[95%] ml-auto flex flex-col gap-[1rem] border-l-2 border-l-[#b4b4c7]'>
-                            {comment.replies.map((reply, replyIndex) => (
-                                <div
-                                    key={replyIndex}
-                                    className='replyItemWrapper w-[95%] ml-auto flex gap-[1.5rem] bg-[#fff] p-[1.5rem] rounded-md'
-                                >
-                                    <div className='voteBox bg-[#eae7fa] py-[0.75rem] min-w-[3rem] flex flex-col justify-between items-center rounded-md'>
-                                        <button
-                                            className={`text-[#7373e3] text-[1.2rem] ${
-                                                reply.vote === 1 ? 'text-[#5358b6] font-bold' : ''
-                                            }`}
-                                            onClick={() => handleVote(comment.id, reply.id, true)}
-                                        >
-                                            +
-                                        </button>
-                                        <p className={`text-[#2222aa] py-[0.5rem]' ${reply.vote ? 'font-bold ' : ''} `}>
-                                            {reply.score + (reply.vote || 0)}
-                                        </p>
-                                        <button
-                                            className={`text-[#7373e3] text-[1.2rem] ${
-                                                reply.vote === -1 ? 'text-[#5358b6] font-bold' : ''
-                                            }`}
-                                            onClick={() => handleVote(comment.id, reply.id, false)}
-                                        >
-                                            -
-                                        </button>
+                            {comment.replies.map((reply) => (
+                                <div key={reply.id}>
+                                    <div className='replyItemWrapper w-[95%] ml-auto flex gap-[1.5rem] bg-[#fff] p-[1.5rem] rounded-md'>
+                                        <div className='voteBox bg-[#eae7fa] py-[0.75rem] min-w-[3rem] flex flex-col justify-between items-center rounded-md'>
+                                            <button
+                                                className={`text-[#7373e3] text-[1.2rem] ${
+                                                    reply.vote === 1 ? 'text-[#5358b6] font-bold' : ''
+                                                }`}
+                                                onClick={() => handleVote(comment.id, reply.id, true)}
+                                            >
+                                                +
+                                            </button>
+                                            <p
+                                                className={`text-[#2222aa] py-[0.5rem]' ${
+                                                    reply.vote ? 'font-bold ' : ''
+                                                } `}
+                                            >
+                                                {reply.score + (reply.vote || 0)}
+                                            </p>
+                                            <button
+                                                className={`text-[#7373e3] text-[1.2rem] ${
+                                                    reply.vote === -1 ? 'text-[#5358b6] font-bold' : ''
+                                                }`}
+                                                onClick={() => handleVote(comment.id, reply.id, false)}
+                                            >
+                                                -
+                                            </button>
+                                        </div>
+                                        <div className='replyItem w-full bg-[#fff]'>
+                                            <div className='replyHeader w-full flex gap-[1rem] items-center mb-[1rem]'>
+                                                <div className='replyAvatar'>
+                                                    <img
+                                                        src={reply.user.image.png}
+                                                        alt={reply.user.username}
+                                                        className='w-[2rem] h-[2rem]'
+                                                    />
+                                                </div>
+                                                <div className='replyName font-bold'>{reply.user.username}</div>
+                                                {reply.user.username === currentUser.username && (
+                                                    <div className='bg-[#5257be] text-white text-[0.75rem] py-[0.1rem] px-[0.5rem] rounded'>
+                                                        you
+                                                    </div>
+                                                )}
+                                                <div className='replyDate opacity-[0.5]'>{reply.createdAt}</div>
+                                                {reply.user.username === currentUser.username ? (
+                                                    <div className='ml-auto interactBtns flex gap-[1rem] items-center justify-center text-[#2222aa]'>
+                                                        <div
+                                                            className='deleteBtn flex items-center text-[#e75f61] cursor-pointer'
+                                                            onClick={() => handleDelete(comment.id, reply.id)}
+                                                        >
+                                                            <i className='fa fa-trash mr-[0.5rem]'></i>
+                                                            <p>Delete</p>
+                                                        </div>
+                                                        <div
+                                                            className='editBtn flex items-center cursor-pointer'
+                                                            onClick={() =>
+                                                                handleEdit(comment.id, reply.id, reply.content)
+                                                            }
+                                                        >
+                                                            <i className='fa fa-edit mr-[0.5rem]'></i>
+                                                            <p>Edit</p>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className='interactBtns flex gap-[1rem] items-center justify-center ml-auto text-[#2222aa]'>
+                                                        <div
+                                                            className='replyBtn flex items-center'
+                                                            role='button'
+                                                            onClick={() => handleReplyClick(comment.id, reply.id)}
+                                                        >
+                                                            <i className='fa fa-reply mr-[0.5rem]'></i>
+                                                            <p>Reply</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className='replyBody opacity-[0.7]'>
+                                                {editingId === reply.id ? (
+                                                    <div className='edit-container'>
+                                                        <textarea
+                                                            className='w-full p-[0.5rem] border border-gray rounded'
+                                                            value={editContent}
+                                                            onChange={(e) => setEditContent(e.target.value)}
+                                                        />
+                                                        <button
+                                                            className='mt-[0.5rem] bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
+                                                            onClick={() => handleSaveEdit(comment.id, reply.id)}
+                                                        >
+                                                            UPDATE
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <span className='text-[#2222aa] font-bold mr-[0.5rem]'>
+                                                            @{reply.replyingTo}
+                                                        </span>
+                                                        {reply.content}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className='replyItem w-full bg-[#fff]'>
-                                        <div className='replyHeader w-full flex gap-[1rem] items-center mb-[1rem]'>
-                                            <div className='replyAvatar'>
+
+                                    {replyingToReply[reply.id] && (
+                                        <div className='replyInputBox w-[95%] ml-auto mt-[1rem] bg-[#fff] p-[1rem] flex gap-[1rem]'>
+                                            <div className='currentUserAvatar'>
                                                 <img
-                                                    src={reply.user.image.png}
-                                                    alt={reply.user.username}
+                                                    src={currentUser.image.png}
                                                     className='w-[2rem] h-[2rem]'
+                                                    alt='user avatar'
                                                 />
                                             </div>
-                                            <div className='replyName font-bold'>{reply.user.username}</div>
-                                            {reply.user.username === currentUser.username && (
-                                                <div className='bg-[#5257be] text-white text-[0.75rem] py-[0.1rem] px-[0.5rem] rounded'>
-                                                    you
-                                                </div>
-                                            )}
-                                            <div className='replyDate opacity-[0.5]'>{reply.createdAt}</div>
-                                            {reply.user.username === currentUser.username ? (
-                                                <div className='ml-auto interactBtns flex gap-[1rem] items-center justify-center text-[#2222aa]'>
-                                                    <div
-                                                        className='deleteBtn flex items-center text-[#e75f61] cursor-pointer'
-                                                        onClick={() => handleDelete(comment.id, reply.id)}
-                                                    >
-                                                        <i className='fa fa-trash mr-[0.5rem]'></i>
-                                                        <p>Delete</p>
-                                                    </div>
-                                                    <div
-                                                        className='editBtn flex items-center cursor-pointer'
-                                                        onClick={() => handleEdit(comment.id, reply.id, reply.content)}
-                                                    >
-                                                        <i className='fa fa-edit mr-[0.5rem]'></i>
-                                                        <p>Edit</p>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className='interactBtns flex gap-[1rem] items-center justify-center ml-auto text-[#2222aa]'>
-                                                    <div
-                                                        className='replyBtn flex items-center'
-                                                        role='button'
-                                                        onClick={() => handleReplyClick(comment.id, reply.id)}
-                                                    >
-                                                        <i className='fa fa-reply mr-[0.5rem]'></i>
-                                                        <p>Reply</p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                            <div className='flex-grow border border-gray rounded'>
+                                                <textarea
+                                                    className='w-full p-[0.5rem]'
+                                                    placeholder='Add a reply...'
+                                                    value={newReplies[reply.id] || ''}
+                                                    onChange={(e) =>
+                                                        setNewReplies((prev) => ({
+                                                            ...prev,
+                                                            [reply.id]: e.target.value,
+                                                        }))
+                                                    }
+                                                />
+                                            </div>
+                                            <button
+                                                className='self-start bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
+                                                onClick={() =>
+                                                    handleReply(comment.id, newReplies[reply.id], 'reply', reply.id)
+                                                }
+                                            >
+                                                REPLY
+                                            </button>
                                         </div>
-                                        <div className='replyBody opacity-[0.7]'>
-                                            {editingId === reply.id ? (
-                                                <div className='edit-container'>
-                                                    <textarea
-                                                        className='w-full p-[0.5rem] border border-gray rounded'
-                                                        value={editContent}
-                                                        onChange={(e) => setEditContent(e.target.value)}
-                                                    />
-                                                    <button
-                                                        className='mt-[0.5rem] bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
-                                                        onClick={() => handleSaveEdit(comment.id, reply.id)}
-                                                    >
-                                                        UPDATE
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <span className='text-[#2222aa] font-bold mr-[0.5rem]'>
-                                                        @{reply.replyingTo}
-                                                    </span>
-                                                    {reply.content}
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
                             ))}
-
-                            {replyingToReply && activeCommentId === comment.id && (
-                                <div className='replyInputBox w-[95%] ml-auto bg-[#fff] p-[1rem] flex gap-[1rem]'>
-                                    <div className='currentUserAvatar'>
-                                        <img src={currentUser.image.png} className='w-[2rem] h-[2rem]' />
-                                    </div>
-                                    <div className='flex-grow border border-gray rounded'>
-                                        <textarea
-                                            className='w-full p-[0.5rem]'
-                                            placeholder='Add a reply...'
-                                            value={newReplyReply}
-                                            onChange={(e) => setNewReplyReply(e.target.value)}
-                                        />
-                                    </div>
-                                    <button
-                                        className='self-start mt-[0.5rem] bg-[#5358b6] text-white py-[0.5rem] px-[1rem] rounded-md'
-                                        onClick={() => handleReply(replyingToReply, newReplyReply, 'reply')}
-                                    >
-                                        Reply
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
@@ -539,7 +579,7 @@ const Component1 = () => {
                 '
             >
                 <div className='currentUserAvatar'>
-                    <img src={currentUser.image.png} className='w-[2rem] h-[2rem]' />
+                    <img src={currentUser.image.png} className='w-[2rem] h-[2rem]' alt='current user avatar' />
                 </div>
                 <div className='flex-grow border border-gray rounded'>
                     <textarea
